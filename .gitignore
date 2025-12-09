@@ -1,3 +1,4 @@
 .venv/
 .env
 data/dataset.csv
+data/*.pkl
