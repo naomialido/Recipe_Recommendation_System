@@ -2,3 +2,10 @@
 .env
 data/dataset.csv
 data/*.pkl
+data/*.npy
+data/*.faiss
+*.log
+*.pid
+__pycache__/
+*.pyc
+instance/

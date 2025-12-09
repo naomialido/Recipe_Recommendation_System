@@ -5,4 +5,4 @@ openai==2.9.0
 pandas==2.1.4
 numpy==1.26.3
 scikit-learn==1.4.0
-faiss-cpu
+faiss-cpu==1.12.1
