@@ -16,7 +16,13 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend requests
 
 # Initialize OpenAI client
-client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+response = client.chat.completions.create(
+    model="gpt-4.1-mini",
+    messages=[{"role": "user", "content": "Hello world"}],
+)
+print(response.choices[0].message)
 
 # Global variables
 recipes = []
