@@ -41,12 +41,15 @@ def load_or_generate_embeddings():
     """Load pre-computed embeddings or generate them if they don't exist"""
     global recipes, index
     
-    print("Loading dataset...")
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    DATA_PATH = os.path.join(BASE_DIR, "data", "dataset.csv")
+
+    print("Looking for dataset at:", DATA_PATH)
     try:
-        df = pd.read_csv("../data/dataset.csv", sep=";", encoding="latin1")
+        df = pd.read_csv(DATA_PATH, sep=";", encoding="latin1")
         print(f"Dataset loaded: {len(df)} recipes found")
     except FileNotFoundError:
-        print("ERROR: dataset.csv not found in ../data/ folder!")
+        print("ERROR: dataset.csv not found at", DATA_PATH)
         return False
     except Exception as e:
         print(f"ERROR loading dataset: {e}")
