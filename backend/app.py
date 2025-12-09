@@ -8,18 +8,19 @@ import numpy as np
 import pickle
 import json
 import gc
-import faiss   
+import faiss
+import time   # NEW: for retry/backoff
 
 # Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)  #Enable CORS for frontend requests
+CORS(app)  # Enable CORS for frontend requests
 
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
-#global variables
+# Global variables
 recipes = []
 index = None   # FAISS index replaces recipe_embeddings
 EMBEDDINGS_FILE = '../data/recipe_embeddings.npy'
@@ -36,6 +37,26 @@ def build_faiss_index(embeddings):
     faiss.write_index(faiss_index, FAISS_INDEX_FILE)
     print(f"FAISS index saved with {faiss_index.ntotal} vectors.")
     return faiss_index
+
+def embed_batch(batch, retries=5):
+    """Embed a batch with retry/backoff on rate limits"""
+    for attempt in range(retries):
+        try:
+            response = client.embeddings.create(
+                model="text-embedding-3-small",
+                input=batch
+            )
+            return [item.embedding for item in response.data]
+        except Exception as e:
+            if "rate_limit_exceeded" in str(e):
+                wait = 2 ** attempt  # exponential backoff
+                print(f"Rate limit hit, retrying batch in {wait}s...")
+                time.sleep(wait)
+            else:
+                print(f"Error embedding batch: {e}")
+                return [[0] * 1536 for _ in batch]
+    # If all retries fail, return zero vectors
+    return [[0] * 1536 for _ in batch]
 
 def load_or_generate_embeddings():
     """Load pre-computed embeddings or generate them if they don't exist"""
@@ -88,7 +109,7 @@ def load_or_generate_embeddings():
         recipe_texts.append(text)
     
     embeddings_list = []
-    batch_size = 50
+    batch_size = 10   # LOWER batch size to reduce TPM usage
     total_batches = (len(recipe_texts) + batch_size - 1) // batch_size
     
     for i in range(0, len(recipe_texts), batch_size):
@@ -96,15 +117,7 @@ def load_or_generate_embeddings():
         batch_num = i//batch_size + 1
         print(f"Processing batch {batch_num}/{total_batches}...")
         
-        try:
-            response = client.embeddings.create(
-                model="text-embedding-3-small",
-                input=batch
-            )
-            embeddings_list.extend([item.embedding for item in response.data])
-        except Exception as e:
-            print(f"Error processing batch {batch_num}: {e}")
-            embeddings_list.extend([[0] * 1536 for _ in batch])
+        embeddings_list.extend(embed_batch(batch))
     
     recipe_embeddings = np.array(embeddings_list, dtype=np.float32)
     
