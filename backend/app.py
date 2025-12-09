@@ -6,10 +6,8 @@ from openai import OpenAI
 import pandas as pd
 import numpy as np
 import pickle
-import json
 import gc
 import faiss
-import time   # NEW: for retry/backoff
 
 # Load environment variables
 load_dotenv()
@@ -23,47 +21,21 @@ client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 # Global variables
 recipes = []
 index = None   # FAISS index replaces recipe_embeddings
-EMBEDDINGS_FILE = '../data/recipe_embeddings.npy'
-PROCESSED_RECIPES_FILE = '../data/processed_recipes.pkl'
-FAISS_INDEX_FILE = '../data/recipe_index.faiss'
+
+# Use absolute paths for safety
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+
+DATA_PATH = os.path.join(DATA_DIR, "dataset.csv")
+EMBEDDINGS_FILE = os.path.join(DATA_DIR, "recipe_embeddings.npy")
+PROCESSED_RECIPES_FILE = os.path.join(DATA_DIR, "processed_recipes.pkl")
+FAISS_INDEX_FILE = os.path.join(DATA_DIR, "recipe_index.faiss")
 
 MAX_RECIPES = 10000
 
-def build_faiss_index(embeddings):
-    """Build and save FAISS index"""
-    d = embeddings.shape[1]  # embedding dimension
-    faiss_index = faiss.IndexFlatL2(d)
-    faiss_index.add(embeddings)
-    faiss.write_index(faiss_index, FAISS_INDEX_FILE)
-    print(f"FAISS index saved with {faiss_index.ntotal} vectors.")
-    return faiss_index
-
-def embed_batch(batch, retries=5):
-    """Embed a batch with retry/backoff on rate limits"""
-    for attempt in range(retries):
-        try:
-            response = client.embeddings.create(
-                model="text-embedding-3-small",
-                input=batch
-            )
-            return [item.embedding for item in response.data]
-        except Exception as e:
-            if "rate_limit_exceeded" in str(e):
-                wait = 2 ** attempt  # exponential backoff
-                print(f"Rate limit hit, retrying batch in {wait}s...")
-                time.sleep(wait)
-            else:
-                print(f"Error embedding batch: {e}")
-                return [[0] * 1536 for _ in batch]
-    # If all retries fail, return zero vectors
-    return [[0] * 1536 for _ in batch]
-
-def load_or_generate_embeddings():
-    """Load pre-computed embeddings or generate them if they don't exist"""
+def load_embeddings_only():
+    """Load pre-computed embeddings and FAISS index (skip generation)"""
     global recipes, index
-    
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    DATA_PATH = os.path.join(BASE_DIR, "data", "dataset.csv")
 
     print("Looking for dataset at:", DATA_PATH)
     try:
@@ -75,15 +47,15 @@ def load_or_generate_embeddings():
     except Exception as e:
         print(f"ERROR loading dataset: {e}")
         return False
-    
+
     # Limit dataset size for memory
     if len(df) > MAX_RECIPES:
         print(f"Limiting to {MAX_RECIPES} recipes for memory optimization...")
         df = df.head(MAX_RECIPES)
-    
+
     recipes = df.to_dict(orient="records")
-    
-    # Check if FAISS index already exists
+
+    # ✅ Only load precomputed files, skip embedding
     if os.path.exists(FAISS_INDEX_FILE) and os.path.exists(PROCESSED_RECIPES_FILE):
         print("Loading FAISS index and recipes...")
         try:
@@ -95,48 +67,15 @@ def load_or_generate_embeddings():
             return True
         except Exception as e:
             print(f"Error loading FAISS index: {e}")
-            print("Will generate new embeddings...")
-    
-    # Generate embeddings
-    print(f"Generating recipe embeddings for {len(recipes)} recipes...")
-    recipe_texts = []
-    for i, r in enumerate(recipes):
-        text = f"{r.get('Name', '')}. "
-        text += f"Cuisine: {r.get('Cuisine', '')}. "
-        text += f"Category: {r.get('Category', '')}. "
-        text += f"Ingredients: {r.get('Ingredients_Raw', '')}. "
-        text += f"Instructions: {r.get('Instructions', '')}"
-        recipe_texts.append(text)
-    
-    embeddings_list = []
-    batch_size = 10   # LOWER batch size to reduce TPM usage
-    total_batches = (len(recipe_texts) + batch_size - 1) // batch_size
-    
-    for i in range(0, len(recipe_texts), batch_size):
-        batch = recipe_texts[i:i+batch_size]
-        batch_num = i//batch_size + 1
-        print(f"Processing batch {batch_num}/{total_batches}...")
-        
-        embeddings_list.extend(embed_batch(batch))
-    
-    recipe_embeddings = np.array(embeddings_list, dtype=np.float32)
-    
-    # Save embeddings + recipes
-    print("Saving embeddings and recipes...")
-    os.makedirs('../data', exist_ok=True)
-    np.save(EMBEDDINGS_FILE, recipe_embeddings)
-    with open(PROCESSED_RECIPES_FILE, 'wb') as f:
-        pickle.dump(recipes, f, protocol=4)
-    
-    # Build FAISS index
-    index = build_faiss_index(recipe_embeddings)
-    gc.collect()
-    return True
+            return False
+    else:
+        print("ERROR: FAISS index not found. Please generate embeddings once manually.")
+        return False
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({
-        "status": "healthy", 
+        "status": "healthy",
         "recipes_loaded": len(recipes),
         "max_recipes": MAX_RECIPES
     })
@@ -146,13 +85,13 @@ def recommend_recipes():
     try:
         data = request.get_json()
         user_ingredients = data.get('ingredients', [])
-        
+
         if not user_ingredients:
             return jsonify({"error": "No ingredients provided"}), 400
-        
+
         if index is None or len(recipes) == 0:
             return jsonify({"error": "Recipe database not loaded"}), 500
-        
+
         # Create embedding for user input
         user_input_text = "Ingredients: " + ", ".join(user_ingredients)
         user_embedding_response = client.embeddings.create(
@@ -160,16 +99,16 @@ def recommend_recipes():
             input=user_input_text
         )
         user_embedding = np.array([user_embedding_response.data[0].embedding], dtype=np.float32)
-        
+
         # Query FAISS index
         distances, indices = index.search(user_embedding, 10)
-        
+
         recommendations = []
         for i, idx in enumerate(indices[0]):
             recipe = recipes[idx]
             recipe_ingredients = str(recipe.get('Ingredients_Raw', '')).lower()
             matched = [ing for ing in user_ingredients if ing.lower() in recipe_ingredients]
-            
+
             recommendations.append({
                 'name': str(recipe.get('Name', 'Unknown')),
                 'cuisine': str(recipe.get('Cuisine', 'Unknown')),
@@ -184,10 +123,10 @@ def recommend_recipes():
                 'matchedIngredients': matched,
                 'matchScore': float(distances[0][i])
             })
-        
+
         gc.collect()
         return jsonify({'recommendations': recommendations, 'totalFound': len(recommendations)})
-        
+
     except Exception as e:
         print(f"Error in recommend_recipes: {e}")
         return jsonify({"error": str(e)}), 500
@@ -197,12 +136,12 @@ if __name__ == '__main__':
     print("Starting Flask server with FAISS...")
     print(f"Max recipes configured: {MAX_RECIPES}")
     print("=" * 60)
-    
-    success = load_or_generate_embeddings()
+
+    success = load_embeddings_only()
     if not success:
         print("ERROR: Failed to load recipe data!")
         exit(1)
-    
+
     print("Server ready!")
     print(f"Loaded {len(recipes)} recipes into FAISS index")
     app.run(debug=False, host='0.0.0.0', port=5000)
