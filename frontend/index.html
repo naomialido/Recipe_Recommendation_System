@@ -62,7 +62,8 @@
             const [useAI, setUseAI] = useState(false);
             const [aiAnalysis, setAiAnalysis] = useState('');
 
-            const API_URL = 'http://localhost:5000/api';
+            const AWS_IP = 'http://18.221.70.66';
+            const API_URL = `${AWS_IP}:5000/api`;
 
             useEffect(() => {
                 checkBackendHealth();
