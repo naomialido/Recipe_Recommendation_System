@@ -96,7 +96,7 @@ def recommend_recipes():
         user_input_text = "Ingredients: " + ", ".join(user_ingredients)
         user_embedding_response = client.embeddings.create(
             model="text-embedding-3-small",
-            input=user_input_text
+            input=[user_input_text]   # must be a list
         )
         user_embedding = np.array([user_embedding_response.data[0].embedding], dtype=np.float32)
 
@@ -131,9 +131,38 @@ def recommend_recipes():
         print(f"Error in recommend_recipes: {e}")
         return jsonify({"error": str(e)}), 500
 
+# -------------------------------
+# AI-assisted recommendations
+# -------------------------------
+@app.route('/api/recommend-ai', methods=['POST'])
+def recommend_ai_recipes():
+    try:
+        data = request.get_json()
+        user_prompt = data.get('prompt', '')
+
+        if not user_prompt:
+            return jsonify({"error": "No prompt provided"}), 400
+
+        # Use OpenAI Chat model to generate suggestions
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a helpful recipe assistant."},
+                {"role": "user", "content": user_prompt}
+            ]
+        )
+
+        ai_text = response.choices[0].message.content
+
+        return jsonify({"aiRecommendations": ai_text})
+
+    except Exception as e:
+        print(f"Error in recommend_ai_recipes: {e}")
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     print("=" * 60)
-    print("Starting Flask server with FAISS...")
+    print("Starting Flask server with FAISS + AI...")
     print(f"Max recipes configured: {MAX_RECIPES}")
     print("=" * 60)
 
