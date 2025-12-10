@@ -13,63 +13,46 @@ import faiss
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for frontend requests
+CORS(app)
 
-# Initialize OpenAI client
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
-# Global variables
 recipes = []
-index = None   # FAISS index replaces recipe_embeddings
+index = None
 
-# Use absolute paths for safety
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
 DATA_PATH = os.path.join(DATA_DIR, "dataset.csv")
-EMBEDDINGS_FILE = os.path.join(DATA_DIR, "recipe_embeddings.npy")
 PROCESSED_RECIPES_FILE = os.path.join(DATA_DIR, "processed_recipes.pkl")
 FAISS_INDEX_FILE = os.path.join(DATA_DIR, "recipe_index.faiss")
 
 MAX_RECIPES = 10000
 
 def load_embeddings_only():
-    """Load pre-computed embeddings and FAISS index (skip generation)"""
     global recipes, index
-
-    print("Looking for dataset at:", DATA_PATH)
     try:
         df = pd.read_csv(DATA_PATH, sep=";", encoding="latin1")
-        print(f"Dataset loaded: {len(df)} recipes found")
-    except FileNotFoundError:
-        print("ERROR: dataset.csv not found at", DATA_PATH)
-        return False
     except Exception as e:
-        print(f"ERROR loading dataset: {e}")
+        print("ERROR loading dataset:", e)
         return False
 
-    # Limit dataset size for memory
     if len(df) > MAX_RECIPES:
-        print(f"Limiting to {MAX_RECIPES} recipes for memory optimization...")
         df = df.head(MAX_RECIPES)
 
     recipes = df.to_dict(orient="records")
 
-    # ✅ Only load precomputed files, skip embedding
     if os.path.exists(FAISS_INDEX_FILE) and os.path.exists(PROCESSED_RECIPES_FILE):
-        print("Loading FAISS index and recipes...")
         try:
             index = faiss.read_index(FAISS_INDEX_FILE)
             with open(PROCESSED_RECIPES_FILE, 'rb') as f:
                 recipes = pickle.load(f)
-            print(f"Loaded {len(recipes)} recipes with FAISS index!")
-            gc.collect()
             return True
         except Exception as e:
-            print(f"Error loading FAISS index: {e}")
+            print("Error loading FAISS index:", e)
             return False
     else:
-        print("ERROR: FAISS index not found. Please generate embeddings once manually.")
+        print("ERROR: FAISS index not found.")
         return False
 
 @app.route('/api/health', methods=['GET'])
@@ -92,23 +75,19 @@ def recommend_recipes():
         if index is None or len(recipes) == 0:
             return jsonify({"error": "Recipe database not loaded"}), 500
 
-        # Create embedding for user input
         user_input_text = "Ingredients: " + ", ".join(user_ingredients)
-        user_embedding_response = client.embeddings.create(
+        response = client.embeddings.create(
             model="text-embedding-3-small",
-            input=[user_input_text]   # must be a list
+            input=[user_input_text]
         )
-        user_embedding = np.array([user_embedding_response.data[0].embedding], dtype=np.float32)
+        user_embedding = np.array([response.data[0].embedding], dtype=np.float32)
 
-        # Query FAISS index
         distances, indices = index.search(user_embedding, 10)
 
         recommendations = []
         for i, idx in enumerate(indices[0]):
             recipe = recipes[idx]
-            recipe_ingredients = str(recipe.get('Ingredients_Raw', '')).lower()
-            matched = [ing for ing in user_ingredients if ing.lower() in recipe_ingredients]
-
+            matched = [ing for ing in user_ingredients if ing.lower() in str(recipe.get('Ingredients_Raw', '')).lower()]
             recommendations.append({
                 'name': str(recipe.get('Name', 'Unknown')),
                 'cuisine': str(recipe.get('Cuisine', 'Unknown')),
@@ -128,22 +107,19 @@ def recommend_recipes():
         return jsonify({'recommendations': recommendations, 'totalFound': len(recommendations)})
 
     except Exception as e:
-        print(f"Error in recommend_recipes: {e}")
+        print("Error in recommend_recipes:", e)
         return jsonify({"error": str(e)}), 500
 
-# -------------------------------
-# AI-assisted recommendations
-# -------------------------------
 @app.route('/api/recommend-ai', methods=['POST'])
 def recommend_ai_recipes():
     try:
         data = request.get_json()
-        user_prompt = data.get('prompt', '')
+        # Accept either prompt or ingredients
+        user_prompt = data.get('prompt') or "Ingredients: " + ", ".join(data.get('ingredients', []))
 
-        if not user_prompt:
+        if not user_prompt.strip():
             return jsonify({"error": "No prompt provided"}), 400
 
-        # Use OpenAI Chat model to generate suggestions
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -153,24 +129,14 @@ def recommend_ai_recipes():
         )
 
         ai_text = response.choices[0].message.content
-
-        return jsonify({"aiRecommendations": ai_text})
+        return jsonify({"aiAnalysis": ai_text})
 
     except Exception as e:
-        print(f"Error in recommend_ai_recipes: {e}")
+        print("Error in recommend_ai_recipes:", e)
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    print("=" * 60)
-    print("Starting Flask server with FAISS + AI...")
-    print(f"Max recipes configured: {MAX_RECIPES}")
-    print("=" * 60)
-
     success = load_embeddings_only()
     if not success:
-        print("ERROR: Failed to load recipe data!")
         exit(1)
-
-    print("Server ready!")
-    print(f"Loaded {len(recipes)} recipes into FAISS index")
     app.run(debug=False, host='0.0.0.0', port=5000)
