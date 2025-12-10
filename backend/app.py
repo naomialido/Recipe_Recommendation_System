@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 import os
@@ -71,6 +71,10 @@ def load_embeddings_only():
         print("💡 Please run: python generate_embeddings.py")
         print("=" * 60)
         return False
+    
+@app.route('/')
+def home():
+    return render_template('index.html')
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
