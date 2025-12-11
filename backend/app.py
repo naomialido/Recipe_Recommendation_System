@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
 import os
@@ -102,7 +102,7 @@ def correct_spelling(user_ingredients, known_ingredients, cutoff=0.8):
 
 @app.route('/')
 def home():
-    return render_template('index.html')
+    return send_file('index.html')
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
