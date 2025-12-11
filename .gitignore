@@ -9,3 +9,12 @@ data/*.faiss
 __pycache__/
 *.pyc
 instance/
+/build
+/dist
+
+# Dependencies
+node_modules/
+/package-lock.json
+/npm-debug.log*
+
+
