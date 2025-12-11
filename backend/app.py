@@ -8,6 +8,9 @@ import numpy as np
 import pickle
 import gc
 import faiss
+from werkzeug.utils import secure_filename
+import base64
+import io
 
 # Load environment variables
 load_dotenv()
@@ -240,6 +243,76 @@ Keep it super concise and helpful!"""
 
     except Exception as e:
         print(f"❌ Error in recommend_ai_recipes: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/analyze-image', methods=['POST'])
+def analyze_image():
+    """Analyze an image to detect ingredients using OpenAI Vision"""
+    try:
+        if 'image' not in request.files:
+            return jsonify({"error": "No image provided"}), 400
+
+        image_file = request.files['image']
+        
+        if image_file.filename == '':
+            return jsonify({"error": "No image selected"}), 400
+
+        # Read image file and convert to base64
+        image_data = image_file.read()
+        base64_image = base64.b64encode(image_data).decode('utf-8')
+
+        # Call OpenAI Vision API
+        print(f"🖼️ Analyzing image: {image_file.filename}")
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Analyze this image and list all visible food ingredients or ingredients you can identify. Return ONLY a simple comma-separated list of ingredient names in lowercase, nothing else. Example: 'chicken, tomatoes, garlic, onion'. If no food ingredients are visible, return 'no ingredients found'."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=200
+        )
+
+        # Parse the response
+        analysis = response.choices[0].message.content.strip().lower()
+        
+        if 'no ingredients' in analysis:
+            print("⚠️ No ingredients detected in image")
+            return jsonify({
+                "ingredients": [],
+                "message": "No food ingredients detected in the image. Try uploading a clearer food image."
+            })
+
+        # Parse comma-separated ingredients
+        ingredients_list = [ing.strip() for ing in analysis.split(',') if ing.strip()]
+        ingredients_list = [ing for ing in ingredients_list if len(ing) > 1]  # Filter out single characters
+
+        print(f"✅ Detected ingredients: {ingredients_list}")
+        
+        gc.collect()
+        
+        return jsonify({
+            "ingredients": ingredients_list,
+            "message": f"Successfully detected {len(ingredients_list)} ingredient(s)"
+        })
+
+    except Exception as e:
+        print(f"❌ Error analyzing image: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500

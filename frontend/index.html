@@ -61,9 +61,12 @@
             const [backendStatus, setBackendStatus] = useState('checking');
             const [useAI, setUseAI] = useState(false);
             const [aiAnalysis, setAiAnalysis] = useState('');
+            const [uploadedImage, setUploadedImage] = useState(null);
+            const [imageLoading, setImageLoading] = useState(false);
 
-            const AWS_IP = 'http://18.221.70.66';
-            const API_URL = `${AWS_IP}:5000/api`;
+            // const AWS_IP = ''
+            // const API_URL = 'http://192.168.1.72:5000';
+            const API_URL = ["localhost", "127.0.0.1"].includes(window.location.hostname)? "http://127.0.0.1:5000/api": "http://18.221.70.66:5000/api";
 
             useEffect(() => {
                 checkBackendHealth();
@@ -82,8 +85,18 @@
 
             const addIngredient = () => {
                 const trimmed = currentInput.trim().toLowerCase();
-                if (trimmed && !ingredients.includes(trimmed)) {
-                    setIngredients([...ingredients, trimmed]);
+                if (trimmed) {
+                    // Split by comma if multiple ingredients are entered
+                    const newIngs = trimmed.split(',').map(ing => ing.trim()).filter(ing => ing);
+                    const updatedIngredients = [...ingredients];
+                    
+                    newIngs.forEach(ing => {
+                        if (!updatedIngredients.includes(ing)) {
+                            updatedIngredients.push(ing);
+                        }
+                    });
+                    
+                    setIngredients(updatedIngredients);
                     setCurrentInput('');
                 }
             };
@@ -95,6 +108,53 @@
             const handleKeyPress = (e) => {
                 if (e.key === 'Enter') {
                     addIngredient();
+                }
+            };
+
+            const handleImageUpload = async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+
+                // Store the file for display
+                setUploadedImage(file.name);
+                setImageLoading(true);
+
+                try {
+                    const formData = new FormData();
+                    formData.append('image', file);
+
+                    const response = await fetch(`${API_URL}/analyze-image`, {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const data = await response.json();
+
+                    if (data.error) {
+                        alert('Error analyzing image: ' + data.error);
+                        setUploadedImage(null);
+                        return;
+                    }
+
+                    // Add detected ingredients to the ingredients list
+                    if (data.ingredients && Array.isArray(data.ingredients)) {
+                        const newIngredients = [...ingredients];
+                        data.ingredients.forEach(ing => {
+                            const trimmed = ing.trim().toLowerCase();
+                            if (trimmed && !newIngredients.includes(trimmed)) {
+                                newIngredients.push(trimmed);
+                            }
+                        });
+                        setIngredients(newIngredients);
+                        alert(`✅ Found ${data.ingredients.length} ingredient(s): ${data.ingredients.join(', ')}`);
+                    }
+
+                } catch (error) {
+                    console.error('Error uploading image:', error);
+                    alert('Failed to analyze image. Make sure the backend server is running.');
+                    setUploadedImage(null);
+                } finally {
+                    setImageLoading(false);
                 }
             };
 
@@ -194,6 +254,33 @@
                                         Add
                                     </button>
                                 </div>
+                            </div>
+
+                            {/* Image Upload Section */}
+                            <div className="mb-6">
+                                <label className="block text-sm font-semibold text-gray-700 mb-3">
+                                    Not sure what you're looking at? Upload an image of your ingredients for recipe selection:
+                                </label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={handleImageUpload}
+                                        disabled={imageLoading}
+                                        className="px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-orange-400 focus:outline-none transition-colors flex-1"
+                                    />
+                                    {uploadedImage && !imageLoading && (
+                                        <div className="px-4 py-3 bg-green-100 text-green-700 rounded-lg font-medium">
+                                            ✓ {uploadedImage}
+                                        </div>
+                                    )}
+                                    {imageLoading && (
+                                        <div className="px-4 py-3 bg-blue-100 text-blue-700 rounded-lg font-medium flex items-center gap-2">
+                                            <div className="w-4 h-4 border-2 border-blue-700 border-t-transparent rounded-full animate-spin"></div>
+                                            Analyzing...
+                                        </div>
+                                    )}
+                                </div>   
                             </div>
 
                             {/* Ingredients Tags */}
@@ -324,13 +411,6 @@
                             </div>
                         )}
 
-                        {/* Placeholder for image upload */}
-                        <div className="mt-8 bg-gray-100 rounded-2xl p-8 text-center border-2 border-dashed border-gray-300">
-                            <ChefHatIcon />
-                            <h3 className="text-xl font-semibold text-gray-600 mb-2 mt-4">Image Recognition</h3>
-                            <p className="text-gray-500">NOT YET AVAILABLE</p>
-                            <p className="text-sm text-gray-400 mt-2">Upload or capture food images to detect ingredients</p>
-                        </div>
                     </div>
 
                     {/* Recipe Detail Modal */}
