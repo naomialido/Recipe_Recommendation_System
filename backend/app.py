@@ -16,7 +16,7 @@ import difflib
 # Load environment variables
 load_dotenv()
 
-app = Flask(__name__, template_folder="../frontend")
+app = Flask(__name__, template_folder="/home/ubuntu/Recipe_Recommendation_System/frontend")
 CORS(app)
 
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
