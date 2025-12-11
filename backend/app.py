@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 import os
@@ -11,6 +11,7 @@ import faiss
 from werkzeug.utils import secure_filename
 import base64
 import io
+import difflib
 
 # Load environment variables
 load_dotenv()
@@ -20,8 +21,10 @@ CORS(app)
 
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
+# Globals
 recipes = []
 index = None
+known_ingredients = []
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -32,8 +35,18 @@ FAISS_INDEX_FILE = os.path.join(DATA_DIR, "recipe_index.faiss")
 
 MAX_RECIPES = 10000
 
+def build_known_ingredients(recipes):
+    """Extract unique ingredient tokens from dataset for spell correction."""
+    known = set()
+    for r in recipes:
+        raw = str(r.get('Ingredients_Raw', '')).lower()
+        for token in raw.replace(",", " ").split():
+            if len(token) > 2:  # skip tiny words like 'of', 'in'
+                known.add(token.strip())
+    return list(known)
+
 def load_embeddings_only():
-    global recipes, index
+    global recipes, index, known_ingredients
     print("=" * 60)
     print("Loading Recipe Database...")
     print("=" * 60)
@@ -50,6 +63,7 @@ def load_embeddings_only():
         df = df.head(MAX_RECIPES)
 
     recipes = df.to_dict(orient="records")
+    known_ingredients = build_known_ingredients(recipes)
 
     if os.path.exists(FAISS_INDEX_FILE) and os.path.exists(PROCESSED_RECIPES_FILE):
         try:
@@ -60,6 +74,9 @@ def load_embeddings_only():
             with open(PROCESSED_RECIPES_FILE, 'rb') as f:
                 recipes = pickle.load(f)
             
+            # Rebuild known ingredients from processed recipes for consistency
+            known_ingredients = build_known_ingredients(recipes)
+
             print(f"✅ Successfully loaded {len(recipes)} recipes with embeddings!")
             print("=" * 60)
             gc.collect()
@@ -74,6 +91,18 @@ def load_embeddings_only():
         print("💡 Please run: python generate_embeddings.py")
         print("=" * 60)
         return False
+    
+def correct_spelling(user_ingredients, known_ingredients, cutoff=0.8):
+    """Correct user ingredient misspellings using difflib fuzzy matching."""
+    corrected = []
+    for ing in user_ingredients:
+        matches = difflib.get_close_matches(ing.lower(), known_ingredients, n=1, cutoff=cutoff)
+        corrected.append(matches[0] if matches else ing)
+    return corrected
+
+@app.route('/')
+def home():
+    return render_template('index.html')
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -92,6 +121,9 @@ def recommend_recipes():
 
         if not user_ingredients:
             return jsonify({"error": "No ingredients provided"}), 400
+
+        # ✅ Correct misspellings
+        user_ingredients = correct_spelling(user_ingredients, known_ingredients)
 
         if index is None or len(recipes) == 0:
             return jsonify({"error": "Recipe database not loaded"}), 500
