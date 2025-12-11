@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 import os
@@ -16,7 +16,7 @@ import difflib
 # Load environment variables
 load_dotenv()
 
-app = Flask(__name__, template_folder="/home/ubuntu/Recipe_Recommendation_System/frontend")
+app = Flask(__name__, static_folder="/home/ubuntu/Recipe_Recommendation_System/frontend", template_folder="/home/ubuntu/Recipe_Recommendation_System/frontend")
 CORS(app)
 
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
@@ -102,7 +102,7 @@ def correct_spelling(user_ingredients, known_ingredients, cutoff=0.8):
 
 @app.route('/')
 def home():
-    return send_file('index.html')
+    return app.send_static_file("index.html")
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
