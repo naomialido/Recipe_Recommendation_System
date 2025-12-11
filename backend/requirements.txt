@@ -1,8 +1,8 @@
-flask==3.0.0
-flask-cors==4.0.0
-python-dotenv==1.0.0
-openai==2.9.0
-pandas==2.1.4
-numpy==1.26.3
-scikit-learn==1.4.0
-faiss-cpu==1.12.1
+flask
+flask-cors
+python-dotenv
+openai
+pandas
+numpy
+scikit-learn
+faiss-cpu
